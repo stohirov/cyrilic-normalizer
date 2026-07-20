@@ -1,15 +1,21 @@
-"""Table-driven Uzbek text normalizer and Cyrillic→Latin transliterator.
+"""Table-driven Uzbek text normalizer and Cyrillic-to-Latin transliterator.
 
 The pipeline has four stages, each exposed as a pure function:
 
-1. :func:`normalize_unicode` — NFC + whitespace/dash cleanup.
-2. :func:`cyrillic_to_latin` — Cyrillic → internal canonical Latin
+1. :func:`normalize_unicode` - NFC plus whitespace cleanup.
+2. :func:`cyrillic_to_latin` - Cyrillic to internal canonical Latin
    (a no-op for text that contains no Cyrillic, so mixed-script input works).
-3. :func:`fold_latin_variants` — *every* known Latin spelling → internal
+3. :func:`fold_latin_variants` - *every* known Latin spelling to the internal
    canonical form.
-4. :func:`render` — internal canonical form → the requested orthography.
+4. :func:`render` - internal canonical form to the requested orthography.
 
 :func:`normalize` chains all four and is the entry point for the TTS front-end.
+
+The internal canonical form is the 1995 orthography with canonical Unicode
+modifier letters; see :mod:`uztext.mappings` for the full definition.
+
+Doctests below spell non-ASCII characters as escapes so that every comment and
+docstring in this package stays pure ASCII.
 
 No function mutates global state; all of them take a string and return a string.
 """
@@ -58,24 +64,24 @@ __all__ = [
 def _match_case(source: str, target: str, next_char: str = "", prev_char: str = "") -> str:
     """Re-apply the casing of ``source`` to ``target``.
 
-    A single-character source (``Ş``, ``Ó``, ``Ч``) is genuinely ambiguous
-    between title case and all caps, so the neighbours decide: look right
-    first, and fall back to looking left when the match sits at the end of a
-    word.
+    A single-character source is genuinely ambiguous between title case and all
+    caps, so the neighbours decide: look right first, and fall back to looking
+    left when the match sits at the end of a word.
 
-    ==================  ==========  ==========  ==========  ========
-    source              prev_char   next_char   target      result
-    ==================  ==========  ==========  ==========  ========
-    ``ş`` (lower)       —           —           ``sh``      ``sh``
-    ``Ş``               —           ``a``       ``sh``      ``Sh``
-    ``Ş``               —           ``A``       ``sh``      ``SH``
-    ``Ч`` (in ``ЁҒОЧ``) ``О``       —           ``ch``      ``CH``
-    ``Ш`` (in ``Ш.``)   —           ``.``       ``sh``      ``Sh``
-    ``SH``              —           —           ``ş``       ``Ş``
-    ==================  ==========  ==========  ==========  ========
+    ====================  ==========  ==========  ========  ========
+    source                prev_char   next_char   target    result
+    ====================  ==========  ==========  ========  ========
+    s-cedilla, lower      -           -           sh        sh
+    S-cedilla             -           a           sh        Sh
+    S-cedilla             -           A           sh        SH
+    CHE, in an all-caps   capital     -           ch        CH
+      word ending in it
+    SHA, in "SHA."        -           .           sh        Sh
+    SH                    -           -           s-ced.    S-cedilla
+    ====================  ==========  ==========  ========  ========
 
-    Caseless characters in ``source`` (e.g. the modifier letter ``ʻ`` in
-    ``Oʻ``) are ignored when deciding the case.
+    Caseless characters in ``source`` (for instance the modifier letter U+02BB
+    in the canonical o letter) are ignored when deciding the case.
     """
     if not target:
         return target
@@ -88,32 +94,34 @@ def _match_case(source: str, target: str, next_char: str = "", prev_char: str = 
 
     if all(c.isupper() for c in cased):
         if len(cased) > 1:
-            # "SH" -> the whole match was capitals: keep shouting.
+            # The whole match was capitals: keep shouting.
             return target.upper()
-        # A single capital. "Şahar" vs "ŞAHAR": the letter to the right wins.
+        # A single capital: title case or all caps? The letter to the right wins.
         if next_char.isupper():
             return target.upper()
         if next_char.islower():
             return title
-        # No cased letter to the right ("ЁҒОЧ", "Ш.") -> ask the left.
+        # No cased letter to the right (end of an all-caps word, or an
+        # abbreviation followed by a full stop): ask the left instead.
         return target.upper() if prev_char.isupper() else title
 
-    # Mixed, e.g. "Sh" or "Oʻ" -> title case.
+    # Mixed case, for instance "Sh" or a capital o letter: title case.
     return title
 
 
 def _compile_table(pairs: Iterable[Tuple[str, str]]) -> Tuple[Pattern[str], Dict[str, str]]:
     """Compile ``(source, target)`` pairs into a longest-match-first regex.
 
-    The lookup dict is keyed on the NFC-normalized *lower-cased* source, which
-    is what the substitution callback uses after case-folding the match.
+    The lookup dict is keyed on the NFC-normalized, lower-cased source, which is
+    what the substitution callback uses after case-folding the match.
     """
     lookup: Dict[str, str] = {}
     for source, target in pairs:
         key = unicodedata.normalize("NFC", source).lower()
         lookup.setdefault(key, target)
 
-    # Longest first so digraphs and o+apostrophe beat single characters.
+    # Longest first, so digraphs and letter-plus-apostrophe sequences beat
+    # single characters.
     alternatives = sorted(lookup, key=len, reverse=True)
     pattern = re.compile("|".join(re.escape(a) for a in alternatives), re.IGNORECASE)
     return pattern, lookup
@@ -143,8 +151,8 @@ _FOLD_WITH_C = _compile_table(list(LATIN_FOLD_TABLE) + list(LATIN_FOLD_BARE_C))
 _RENDER = {scheme: _compile_table(table) for scheme, table in RENDER_TABLES.items() if table}
 
 # Any leftover apostrophe-like character that is not the tail of a canonical
-# oʻ/gʻ is a tutuq belgisi and is unified on U+02BC. The negative lookbehind
-# protects the canonical sequences the fold table has just produced.
+# o/g letter is a tutuq belgisi and is unified on U+02BC. The negative
+# lookbehind protects the canonical sequences the fold table has just produced.
 _STRAY_APOSTROPHE = re.compile(
     "(?<![oOgG])" + re.escape(TURNED_COMMA) + "|"
     "[" + re.escape("".join(a for a in APOSTROPHE_VARIANTS if a != TURNED_COMMA)) + "]"
@@ -152,17 +160,17 @@ _STRAY_APOSTROPHE = re.compile(
 
 
 # --------------------------------------------------------------------------
-# Stage 1 — Unicode normalization
+# Stage 1 - Unicode normalization
 # --------------------------------------------------------------------------
 
 #: Characters that are visually whitespace but break naive tokenizers.
 _WHITESPACE_LIKE = re.compile(
-    "[\u00a0"       # NO-BREAK SPACE
-    "\u1680"        # OGHAM SPACE MARK
-    "\u2000-\u200a"  # EN QUAD .. HAIR SPACE
-    "\u202f"        # NARROW NO-BREAK SPACE
-    "\u205f"        # MEDIUM MATHEMATICAL SPACE
-    "\u3000"        # IDEOGRAPHIC SPACE
+    "[\u00a0"         # NO-BREAK SPACE
+    "\u1680"          # OGHAM SPACE MARK
+    "\u2000-\u200a"   # EN QUAD .. HAIR SPACE
+    "\u202f"          # NARROW NO-BREAK SPACE
+    "\u205f"          # MEDIUM MATHEMATICAL SPACE
+    "\u3000"          # IDEOGRAPHIC SPACE
     "\t]"
 )
 
@@ -177,15 +185,15 @@ _ZERO_WIDTH = re.compile(
 
 
 def normalize_unicode(text: str) -> str:
-    """Normalize ``text`` to NFC and clean up invisible/duplicate whitespace.
+    """Normalize ``text`` to NFC and clean up invisible or duplicate whitespace.
 
     Steps: strip zero-width characters, map exotic spaces to U+0020, collapse
-    runs of spaces, apply NFC composition (so ``o`` + combining acute becomes
-    ``ó``), and trim. Line structure is preserved — only horizontal whitespace
-    is collapsed.
+    runs of spaces, apply NFC composition (so that a base letter followed by a
+    combining accent becomes a single precomposed character), and trim. Line
+    structure is preserved - only horizontal whitespace is collapsed.
 
-    >>> normalize_unicode("O\\u2019zbek\\u00a0 tili")
-    'O’zbek tili'
+    >>> normalize_unicode("O\\u2019zbek\\u00a0 tili") == "O\\u2019zbek tili"
+    True
     """
     if not text:
         return text
@@ -199,7 +207,7 @@ def normalize_unicode(text: str) -> str:
 
 
 # --------------------------------------------------------------------------
-# Stage 2 — Cyrillic transliteration
+# Stage 2 - Cyrillic transliteration
 # --------------------------------------------------------------------------
 
 
@@ -211,20 +219,24 @@ def _is_cyrillic_letter(char: str) -> bool:
 def cyrillic_to_latin(text: str) -> str:
     """Transliterate Uzbek Cyrillic into the internal canonical Latin form.
 
-    Non-Cyrillic characters — Latin letters, digits, punctuation, emoji — pass
+    Non-Cyrillic characters - Latin letters, digits, punctuation, emoji - pass
     through untouched, so mixed-script input is handled by simply calling this
     on the whole string.
 
-    Context-sensitive rules (all data-driven from :mod:`uztext.mappings`):
+    Context-sensitive rules, all data-driven from :mod:`uztext.mappings`:
 
-    * ``е`` → ``ye`` word-initially, after a vowel, or after ъ/ь; ``e`` after a
-      consonant.
-    * ``ц`` → ``s`` word-initially, ``ts`` elsewhere.
-    * ``ъ`` → ``ʼ`` between letters, dropped at a word edge.
-    * ``ь`` → always dropped.
+    * CYRILLIC IE becomes "ye" word-initially, after a vowel, or after a hard
+      or soft sign, and "e" after a consonant.
+    * CYRILLIC TSE becomes "s" word-initially and "ts" elsewhere.
+    * CYRILLIC HARD SIGN becomes the tutuq belgisi (U+02BC) between letters and
+      is dropped at a word edge.
+    * CYRILLIC SOFT SIGN is always dropped.
 
-    >>> cyrillic_to_latin("Ўзбекистон")
-    'Oʻzbekiston'
+    The doctest below transliterates the Cyrillic spelling of "Uzbekistan".
+
+    >>> name = "\\u040e\\u0437\\u0431\\u0435\\u043a\\u0438\\u0441\\u0442\\u043e\\u043d"
+    >>> cyrillic_to_latin(name) == "O\\u02bbzbekiston"
+    True
     """
     if not text:
         return text
@@ -240,17 +252,17 @@ def cyrillic_to_latin(text: str) -> str:
         nxt = text[index + 1] if index + 1 < len(text) else ""
         prev_lower = prev.lower()
 
-        if lower == "е":
+        if lower == "е":  # CYRILLIC IE
             initial = not _is_cyrillic_letter(prev)
             target = (
                 CYRILLIC_E_IOTATED
                 if initial or prev_lower in CYRILLIC_VOWELS or prev_lower in CYRILLIC_SIGNS
                 else CYRILLIC_E_PLAIN
             )
-        elif lower == "ц":
+        elif lower == "ц":  # CYRILLIC TSE
             initial = not _is_cyrillic_letter(prev)
             target = CYRILLIC_TS_INITIAL if initial else CYRILLIC_TS_MEDIAL
-        elif lower == "ъ":
+        elif lower == "ъ":  # CYRILLIC HARD SIGN
             medial = _is_cyrillic_letter(prev) and _is_cyrillic_letter(nxt)
             target = CYRILLIC_HARD_SIGN_MEDIAL if medial else CYRILLIC_HARD_SIGN_EDGE
         else:
@@ -262,7 +274,7 @@ def cyrillic_to_latin(text: str) -> str:
 
 
 # --------------------------------------------------------------------------
-# Stage 3 — Latin variant folding
+# Stage 3 - Latin variant folding
 # --------------------------------------------------------------------------
 
 
@@ -270,56 +282,58 @@ def fold_latin_variants(text: str, *, fold_bare_c: bool = True) -> str:
     """Fold every known Latin spelling variant into the internal canonical form.
 
     This runs on *all* input, whatever scheme it was written in, because real
-    corpora mix orthographies inside a single document (and often a single
-    sentence). ``oʻ``, ``o'``, ``o’``, ``o```, ``ó``, ``ö`` and ``ō`` all
-    become the same canonical token ``oʻ``.
+    corpora mix orthographies inside a single document, and often inside a
+    single sentence. The o letter written with a turned comma, an ASCII quote,
+    a typographic quote, a backtick, an acute, an umlaut or a macron all become
+    the same canonical token.
 
     Args:
         text: Text that is already Latin (call :func:`cyrillic_to_latin` first
             if it may contain Cyrillic).
-        fold_bare_c: Map a standalone ``c`` (not part of ``ch``) to ``ts``.
-            ``c`` is not a letter of the 1995 alphabet, so this recovers the
-            2019 spelling ``konstituciya`` → ``konstitutsiya``. Set to ``False``
-            when the text is known to contain untransliterated foreign words
-            such as *Coca-Cola*.
+        fold_bare_c: Map a standalone "c" (not part of "ch") to "ts". "c" is not
+            a letter of the 1995 alphabet, so this recovers the 2019 spelling:
+            "konstituciya" becomes "konstitutsiya". Set to ``False`` when the
+            text is known to contain untransliterated foreign words such as
+            "Coca-Cola".
 
     Returns:
         The canonical-form text.
 
-    >>> fold_latin_variants("Ózbek va O'zbek va Özbek")
-    'Oʻzbek va Oʻzbek va Oʻzbek'
+    >>> fold_latin_variants("\\u00d3zbek va O'zbek") == "O\\u02bbzbek va O\\u02bbzbek"
+    True
     """
     if not text:
         return text
 
     folded = _apply_table(text, _FOLD_WITH_C if fold_bare_c else _FOLD)
-    # Whatever apostrophe-ish character survived is not part of oʻ/gʻ, so it is
-    # a tutuq belgisi: unify it on U+02BC.
+    # Whatever apostrophe-like character survived is not part of the o or g
+    # letter, so it is a tutuq belgisi: unify it on U+02BC.
     return _STRAY_APOSTROPHE.sub(MODIFIER_APOSTROPHE, folded)
 
 
 # --------------------------------------------------------------------------
-# Stage 4 — Rendering
+# Stage 4 - Rendering
 # --------------------------------------------------------------------------
 
 
 def render(text: str, scheme: LatinScheme = LatinScheme.LATIN_1995) -> str:
     """Render canonical-form ``text`` in the orthography of ``scheme``.
 
-    The input is assumed to be in the internal canonical form (the output of
-    :func:`fold_latin_variants`). Characters with no entry in the scheme's
-    table — digits, punctuation, foreign words — pass through.
+    The input is assumed to be in the internal canonical form, that is, the
+    output of :func:`fold_latin_variants`. Characters with no entry in the
+    scheme's table - digits, punctuation, foreign words - pass through.
 
-    >>> render("Oʻzbekiston", LatinScheme.LATIN_2026)
-    'Ózbekiston'
-    >>> render("Oʻzbekiston", LatinScheme.LATIN_1995)
-    'Oʻzbekiston'
+    >>> canonical = "O\\u02bbzbekiston"
+    >>> render(canonical, LatinScheme.LATIN_2026) == "\\u00d6zbekiston"
+    True
+    >>> render(canonical, LatinScheme.LATIN_1995) == canonical
+    True
     """
     if not isinstance(scheme, LatinScheme):
         raise TypeError(f"scheme must be a LatinScheme, got {type(scheme).__name__}")
 
     compiled = _RENDER.get(scheme)
-    if compiled is None:  # LATIN_1995: canonical form, nothing to do.
+    if compiled is None:  # LATIN_1995 is the canonical form: nothing to do.
         return text
     return _apply_table(text, compiled)
 
@@ -335,11 +349,11 @@ def normalize(
     *,
     fold_bare_c: bool = True,
 ) -> str:
-    """Normalize Uzbek text of any script/orthography into ``output_scheme``.
+    """Normalize Uzbek text of any script or orthography into ``output_scheme``.
 
-    The full front-end pipeline for a TTS system:
-    unicode-normalize → transliterate Cyrillic → fold Latin variants to the
-    internal canonical form → render the target orthography.
+    The full front-end pipeline for a TTS system: unicode-normalize, then
+    transliterate Cyrillic, then fold Latin variants into the internal
+    canonical form, then render the target orthography.
 
     Args:
         text: Raw input in Cyrillic, any Latin orthography, or a mix of both.
@@ -350,10 +364,10 @@ def normalize(
     Returns:
         Normalized text in the requested orthography.
 
-    >>> normalize("Ўзбекистон Республикаси")
-    'Oʻzbekiston Respublikasi'
-    >>> normalize("Ózbekiston", LatinScheme.LATIN_2026)
-    'Ózbekiston'
+    >>> normalize("O'zbekiston") == "O\\u02bbzbekiston"
+    True
+    >>> normalize("O'zbekiston", LatinScheme.LATIN_2026) == "\\u00d6zbekiston"
+    True
     """
     text = normalize_unicode(text)
     text = cyrillic_to_latin(text)

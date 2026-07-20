@@ -16,7 +16,8 @@ from uztext.mappings import CANON_G, CANON_O, MODIFIER_APOSTROPHE, TURNED_COMMA
 
 ALL_SCHEMES = list(LatinScheme)
 
-#: A sentence exercising oʻ, gʻ, sh, ch, ng, ts and the tutuq belgisi.
+#: A sentence exercising the o and g letters, sh, ch, ng, ts and the tutuq
+#: belgisi.
 CANONICAL_SAMPLE = (
     "Oʻzbekiston Respublikasi gʻalabasi: shahar chegarasida "
     "koʻngil maʼnosi va konstitutsiya."
@@ -55,24 +56,24 @@ def test_normalize_is_idempotent(scheme: LatinScheme) -> None:
 # --------------------------------------------------------------------------
 
 O_VARIANTS = [
-    "oʻzbek",  # 1995 canonical (U+02BB)
+    "oʻzbek",  # 1995 canonical, o + U+02BB
     "o'zbek",  # ASCII apostrophe
-    "o’zbek",  # right single quote
-    "o‘zbek",  # left single quote
+    "o’zbek",  # right single quotation mark
+    "o‘zbek",  # left single quotation mark
     "o`zbek",  # backtick
-    "oʼzbek",  # modifier apostrophe (U+02BC)
-    "ózbek",  # 2019 / 2026
-    "özbek",  # 1993
-    "ōzbek",  # 2021 draft macron
+    "oʼzbek",  # modifier letter apostrophe, U+02BC
+    "ózbek",  # 2019, o-acute
+    "özbek",  # 1993 and 2026, o-umlaut
+    "ōzbek",  # 2021 draft, o-macron
 ]
 
 G_VARIANTS = [
-    "gʻalaba",  # 1995 canonical
+    "gʻalaba",  # 1995 canonical, g + U+02BB
     "g'alaba",  # ASCII apostrophe
-    "g’alaba",  # right single quote
-    "ǵalaba",  # 2019
-    "ğalaba",  # 1993 / 2026
-    "ḡalaba",  # macron draft
+    "g’alaba",  # right single quotation mark
+    "ǵalaba",  # 2019, g-acute
+    "ğalaba",  # 1993 and 2026, g-breve
+    "ḡalaba",  # 2021 draft, g-macron
 ]
 
 SH_VARIANTS = ["shahar", "şahar", "șahar", "šahar"]
@@ -108,7 +109,7 @@ def test_mixed_orthography_in_one_string() -> None:
     mixed = "Ózbekiston va o'zbek va özbek va oʻzbek"
     assert normalize(mixed) == "Oʻzbekiston va oʻzbek va oʻzbek va oʻzbek"
     assert normalize(mixed, LatinScheme.LATIN_2026) == (
-        "Ózbekiston va ózbek va ózbek va ózbek"
+        "Özbekiston va özbek va özbek va özbek"
     )
 
 
@@ -123,7 +124,7 @@ def test_mixed_orthography_in_one_string() -> None:
         (LatinScheme.LATIN_1993, "Özbekiston"),
         (LatinScheme.LATIN_1995, "Oʻzbekiston"),
         (LatinScheme.LATIN_2019, "Ózbekiston"),
-        (LatinScheme.LATIN_2026, "Ózbekiston"),
+        (LatinScheme.LATIN_2026, "Özbekiston"),
     ],
     ids=lambda v: getattr(v, "name", v),
 )
@@ -184,12 +185,12 @@ def test_render_defaults_to_1995() -> None:
         ("Тошкент", "Toshkent"),
         ("Самарқанд", "Samarqand"),
         ("Чирчиқ", "Chirchiq"),
-        ("Хива", "Xiva"),  # х -> x
-        ("Ҳудуд", "Hudud"),  # ҳ -> h
-        ("жуда", "juda"),  # ж -> j
-        ("ёшлар", "yoshlar"),  # ё -> yo
-        ("юксак", "yuksak"),  # ю -> yu
-        ("ярим", "yarim"),  # я -> ya
+        ("Хива", "Xiva"),  # CYRILLIC HA -> x
+        ("Ҳудуд", "Hudud"),  # CYRILLIC HA WITH DESCENDER -> h
+        ("жуда", "juda"),  # CYRILLIC ZHE -> j
+        ("ёшлар", "yoshlar"),  # CYRILLIC IO -> yo
+        ("юксак", "yuksak"),  # CYRILLIC YU -> yu
+        ("ярим", "yarim"),  # CYRILLIC YA -> ya
         ("ғоя", "gʻoya"),
         ("Гўзал", "Goʻzal"),
     ],
@@ -201,13 +202,13 @@ def test_cyrillic_to_latin_basics(cyrillic: str, expected: str) -> None:
 @pytest.mark.parametrize(
     "cyrillic, expected",
     [
-        ("Ер", "Yer"),  # word-initial е -> ye
-        ("Европа", "Yevropa"),  # word-initial е -> ye
+        ("Ер", "Yer"),  # word-initial IE -> ye
+        ("Европа", "Yevropa"),  # word-initial IE -> ye
         ("мен", "men"),  # after consonant -> e
         ("келди", "keldi"),  # after consonant -> e
         ("оева", "oyeva"),  # after vowel -> ye
-        ("объект", "obʼyekt"),  # after ъ -> ye, ъ -> ʼ
-        ("Эркин", "Erkin"),  # э is never iotated
+        ("объект", "obʼyekt"),  # after hard sign -> ye; hard sign -> tutuq belgisi
+        ("Эркин", "Erkin"),  # CYRILLIC E is never iotated
     ],
 )
 def test_cyrillic_e_and_ye(cyrillic: str, expected: str) -> None:
@@ -217,9 +218,9 @@ def test_cyrillic_e_and_ye(cyrillic: str, expected: str) -> None:
 @pytest.mark.parametrize(
     "cyrillic, expected",
     [
-        ("цирк", "sirk"),  # word-initial ц -> s
-        ("Цюрих", "Syurix"),  # word-initial ц -> s, casing preserved
-        ("конституция", "konstitutsiya"),  # medial ц -> ts
+        ("цирк", "sirk"),  # word-initial TSE -> s
+        ("Цюрих", "Syurix"),  # word-initial TSE -> s, casing preserved
+        ("конституция", "konstitutsiya"),  # medial TSE -> ts
         ("революция", "revolyutsiya"),
     ],
 )
@@ -230,12 +231,12 @@ def test_cyrillic_ts(cyrillic: str, expected: str) -> None:
 @pytest.mark.parametrize(
     "cyrillic, expected",
     [
-        ("маъно", "maʼno"),  # medial ъ -> ʼ
+        ("маъно", "maʼno"),  # medial hard sign -> tutuq belgisi
         ("таъриф", "taʼrif"),
         ("санъат", "sanʼat"),
-        ("медаль", "medal"),  # ь dropped
-        ("Ольга", "Olga"),  # ь dropped
-        ("асосъ", "asos"),  # word-final ъ dropped
+        ("медаль", "medal"),  # soft sign dropped
+        ("Ольга", "Olga"),  # soft sign dropped
+        ("асосъ", "asos"),  # word-final hard sign dropped
     ],
 )
 def test_cyrillic_soft_and_hard_signs(cyrillic: str, expected: str) -> None:
@@ -368,7 +369,7 @@ def test_decomposed_input_folds() -> None:
 
 
 def test_apostrophe_unification() -> None:
-    """Every tutuq belgisi variant lands on U+02BC; oʻ/gʻ tails on U+02BB."""
+    """Every tutuq belgisi variant lands on U+02BC; o/g tails on U+02BB."""
     for raw in ["ma'no", "ma’no", "ma‘no", "maʼno", "ma`no"]:
         assert normalize(raw) == "ma" + MODIFIER_APOSTROPHE + "no"
     assert normalize("o'zbek") == "o" + TURNED_COMMA + "zbek"
@@ -387,7 +388,7 @@ def test_mixed_script_and_orthography_together() -> None:
         "Toshkent shahri, Sirdaryo viloyati, Qashqadaryo — OʻZBEKISTON"
     )
     assert normalize(text, LatinScheme.LATIN_2026) == (
-        "Toşkent şahri, Sirdaryo viloyati, Qaşqadaryo — ÓZBEKISTON"
+        "Toşkent şahri, Sirdaryo viloyati, Qaşqadaryo — ÖZBEKISTON"
     )
 
 

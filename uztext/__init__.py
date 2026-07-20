@@ -1,16 +1,22 @@
-"""Uzbek text normalization and Cyrillic→Latin transliteration for TTS.
+"""Uzbek text normalization and Cyrillic-to-Latin transliteration for TTS.
 
-Typical use — accept anything, emit the current standard::
+Accept any script and any orthography, emit exactly one. The default output is
+the 1995 standard; see README.md for the scheme comparison table.
+
+Doctests spell non-ASCII characters as escapes so that every comment and
+docstring in this package stays pure ASCII.
+
+Typical use::
 
     >>> from uztext import normalize
-    >>> normalize("Ўзбекистон Республикаси")
-    'Oʻzbekiston Respublikasi'
+    >>> normalize("O'zbekiston Respublikasi") == "O\\u02bbzbekiston Respublikasi"
+    True
 
 Emit a different orthography::
 
     >>> from uztext import normalize, LatinScheme
-    >>> normalize("O'zbekiston", LatinScheme.LATIN_2026)
-    'Ózbekiston'
+    >>> normalize("O'zbekiston", LatinScheme.LATIN_2026) == "\\u00d6zbekiston"
+    True
 """
 
 from .mappings import LatinScheme
